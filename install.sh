@@ -76,6 +76,7 @@ install() {
   rm -f "$temp_file"
 
   log "Installed '$BINARY_NAME' at '$DESTINATION_FOLDER'.\nPlease add this location to your PATH if not already done."
+  log "Run '$BINARY_NAME init-config' to initialize a sample configuration file."
   exit 0
 }
 

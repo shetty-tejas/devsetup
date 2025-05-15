@@ -3,11 +3,13 @@
 set -e
 
 BINARY_NAME="devsetup"
-CONFIG_FILE_LOCATION="$HOME/.config/devsetup.json"
+CONFIG_FOLDER="$HOME/.config"
+CONFIG_NAME="devsetup.json"
 DESTINATION_FOLDER="$HOME/.local/bin"
 RAW_CONTENT_URL="https://raw.githubusercontent.com/shetty-tejas/devsetup/refs/heads/master"
 
 BINARY_FILE_LOCATION="$DESTINATION_FOLDER/$BINARY_NAME"
+CONFIG_FILE_LOCATION="$CONFIG_FOLDER/$CONFIG_NAME"
 
 # Utility Functions.
 
@@ -48,6 +50,11 @@ read_config() {
   cat "$config_file_url"
 
   return 0
+}
+
+# Function to parse config and return values as expected by the arguments
+parse_config() {
+  log "Hello, World."
 }
 
 # Command Functions.
@@ -101,7 +108,7 @@ update_self() {
   fi
 
   log "Updating to the latest version..."
-  cat "$temp_file" > "$BINARY_FILE_LOCATION"
+  cat "$temp_file" >"$BINARY_FILE_LOCATION"
   chmod +x "$BINARY_FILE_LOCATION"
 
   log "Cleaning up..."
@@ -112,7 +119,62 @@ update_self() {
 }
 
 initialize_config() {
-  log "Hello, World!"
+  if [ -e "$CONFIG_FILE_LOCATION" ]; then
+    error "'$CONFIG_NAME' already exists in '$CONFIG_FOLDER'. Update that file according to your needs, or delete the config to reinitialize.\n"
+
+    return 1
+  fi
+
+  log "Creating config file at '$CONFIG_FILE_LOCATION'..."
+
+  config_url="$RAW_CONTENT_URL/$CONFIG_NAME"
+  temp_file=$(mktemp)
+
+  log "Downloading latest config from '$config_url'"
+
+  if command -v curl >/dev/null 2>&1; then
+    if ! curl -s -S -f "$config_url" -o "$temp_file"; then
+      error "Failed to download the latest config."
+
+      rm -f "$temp_file"
+      return 1
+    fi
+  else
+    error "'curl' not found."
+
+    rm -f "$temp_file"
+    return 1
+  fi
+
+  if [ ! -s "$temp_file" ]; then
+    error "Downloaded file is empty."
+
+    rm -f "$temp_file"
+    return 1
+  fi
+
+  first_line=$(head -n 1 "$temp_file")
+
+  if log "$first_line" | grep -Eq '{'; then
+    :
+  else
+    error "Downloaded file doesn't appear to be a valid json file."
+
+    rm -f "$temp_file"
+    return 1
+  fi
+
+  log "Writing the config..."
+
+  mkdir -p "$CONFIG_FOLDER"
+  touch "$CONFIG_FILE_LOCATION"
+  cat "$temp_file" >"$CONFIG_FILE_LOCATION"
+
+  log "Cleaning up..."
+  rm -f "$temp_file"
+
+  log "Config has been created in '$CONFIG_FILE_LOCATION'."
+  return 0
 }
 
 # Main function
@@ -129,6 +191,11 @@ main() {
 
   if [ "$1" = "install" ]; then
     read_config
+
+    # log $(parse_config $json ".tools.rust.0")
+    # log $(parse_config $json ".tools.nodejs.0")
+    # log $(parse_config $json ".tools.nodejs.7")
+    # log $(parse_config $json ".commands.nodejs.install")
     exit $?
   fi
 
