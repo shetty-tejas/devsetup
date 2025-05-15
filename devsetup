@@ -17,6 +17,8 @@ CONFIG_FILE_LOCATION="$CONFIG_FOLDER/$CONFIG_NAME"
 error() { printf "ERROR: %b\n" "$1" >&2; }
 # Function to echo messages to STDOUT.
 log() { printf "%b\n" "$1"; }
+# Function to return messages.
+return_with() { printf "%b" "$@"; }
 
 # Function to get the config location.
 get_config_location() {
@@ -26,7 +28,7 @@ get_config_location() {
     config_file_url="$DEVSETUP_CONFIG_LOCATION"
   fi
 
-  echo $config_file_url
+  return_with "$config_file_url"
 
   return 0
 }
@@ -34,8 +36,6 @@ get_config_location() {
 # Function to read the config from the config location.
 read_config() {
   config_file_url="$(get_config_location)"
-
-  log "Reading config file from '$config_file_url'."
 
   if [ -z "$config_file_url" ]; then
     error "File path is missing."
@@ -47,14 +47,259 @@ read_config() {
     return 1
   fi
 
-  cat "$config_file_url"
+  return_with "$(cat "$config_file_url")"
 
   return 0
 }
 
-# Function to parse config and return values as expected by the arguments
+# Function to parse config and return values as expected by the arguments.
+# P.S: I don't have any idea how this abomination of a code works, thanks to Claude 3.7!
 parse_config() {
-  log "Hello, World."
+  json="$(read_config)"
+  path="$1"
+
+  # Normalize JSON by removing formatting whitespace but preserving spaces in strings
+  normalized_json="$(printf "%s" "$json" | awk '
+    BEGIN { in_string=0 }
+    {
+      for (i=1; i<=length($0); i++) {
+        c = substr($0, i, 1)
+        prev_c = (i > 1) ? substr($0, i-1, 1) : ""
+        
+        # Toggle in_string when encountering unescaped quotes
+        if (c == "\"" && prev_c != "\\") {
+          in_string = !in_string
+        }
+        
+        # Print character as is if in string or not whitespace
+        if (in_string || c !~ /[[:space:]]/) {
+          printf "%s", c
+        } 
+      }
+    }
+  ' | tr -d "\n")"
+
+  # If no path is provided, return the entire JSON
+  if [ -z "$path" ]; then
+    printf "%s" "$json"
+    return 0
+  fi
+
+  # Split the path into segments
+  old_IFS="$IFS"
+  IFS="."
+  # shellcheck disable=SC2086
+  set -- $path
+  IFS="$old_IFS"
+  shift # Remove the first empty segment (from leading dot)
+
+  # Use the normalized JSON for parsing
+  current_json="$normalized_json"
+
+  while [ $# -gt 0 ]; do
+    segment="$1"
+    shift
+
+    # Check if segment is a number (array index)
+    case "$segment" in
+    '' | *[!0-9]*)
+      # Handle object key lookup
+      # Look for the pattern "segment": followed by a value
+      # Use a more robust pattern that can handle whitespace
+      pattern="\"$segment\"[[:space:]]*:[[:space:]]*"
+
+      # Check if the key exists using grep
+      matched_pattern=$(printf "%s" "$current_json" | grep -E "$pattern" 2>/dev/null)
+      if [ -z "$matched_pattern" ]; then
+        # Key doesn't exist, return null
+        current_json=""
+        break
+      fi
+
+      # Extract the value after the key, preserving whitespace
+      remaining=$(printf "%s" "$current_json" | sed -n "s/.*$pattern//p")
+
+      # Determine if the value is an object, array, or simple value
+      # Skip leading whitespace without removing it from the content
+      first_char=$(printf "%s" "$remaining" | sed -e 's/^[[:space:]]*//' | cut -c 1)
+
+      if [ "$first_char" = "{" ]; then
+        # Extract object
+        level=1
+        i=1
+        len=$(printf "%s" "$remaining" | wc -c)
+        value="{"
+
+        while [ $level -gt 0 ] && [ $i -lt $len ]; do
+          i=$((i + 1))
+          char=$(printf "%s" "$remaining" | cut -c "$i")
+          value="$value$char"
+
+          if [ "$char" = "{" ]; then
+            level=$((level + 1))
+          elif [ "$char" = "}" ]; then
+            level=$((level - 1))
+          fi
+        done
+
+        current_json="$value"
+      elif [ "$first_char" = "[" ]; then
+        # Extract array
+        level=1
+        i=1
+        len=$(printf "%s" "$remaining" | wc -c)
+        value="["
+
+        while [ $level -gt 0 ] && [ $i -lt $len ]; do
+          i=$((i + 1))
+          char=$(printf "%s" "$remaining" | cut -c "$i")
+          value="$value$char"
+
+          if [ "$char" = "[" ]; then
+            level=$((level + 1))
+          elif [ "$char" = "]" ]; then
+            level=$((level - 1))
+          fi
+        done
+
+        current_json="$value"
+      else
+        # Extract simple value (string, number, boolean, null)
+        if [ "$first_char" = "\"" ]; then
+          # Improved string extraction that handles escaped quotes and preserves whitespace
+          in_string=1
+          i=0
+          len=$(printf "%s" "$remaining" | wc -c)
+          value=""
+
+          # Skip leading whitespace
+          remaining=$(printf "%s" "$remaining" | sed -e 's/^[[:space:]]*//')
+
+          # Extract content starting from first quote
+          while [ $i -lt $len ]; do
+            i=$((i + 1))
+            char=$(printf "%s" "$remaining" | cut -c "$i")
+
+            if [ "$char" = "\"" ] && [ $i -gt 1 ]; then
+              prev_char=$(printf "%s" "$remaining" | cut -c "$((i - 1))")
+              if [ "$prev_char" != "\\" ]; then
+                # Unescaped quote marks end of string
+                break
+              fi
+            fi
+
+            value="$value$char"
+          done
+
+          # Remove the opening quote
+          value=$(printf "%s" "$value" | cut -c 2-)
+          current_json="\"$value\""
+        else
+          # Other primitive value (handle up to the next comma or closing bracket/brace)
+          # Preserve internal whitespace
+          pattern="^[[:space:]]*([^,}\]]*)[,}\]].*"
+          value=$(printf "%s" "$remaining" | grep -Eo "$pattern" | sed -e 's/^[[:space:]]*//' | sed -n 's/^\([^,}\]]*\)[,}\]].*/\1/p')
+
+          if [ -z "$value" ]; then
+            # If the regex approach failed, try a more direct approach for the last item in an object/array
+            value=$(printf "%s" "$remaining" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | sed -n 's/\([^,}]*\)[[:space:]]*$/\1/p')
+          fi
+
+          current_json="$value"
+        fi
+      fi
+      ;;
+    *)
+      # Extract array element at the specified index
+      # First, remove everything outside the square brackets
+      array_content=$(printf "%s" "$current_json" | sed -e 's/^[^[]*\[//' -e 's/\][^]]*$//')
+
+      # Add commas to the beginning and end to ease element extraction
+      array_content=",$array_content,"
+
+      # Don't replace newlines but standardize spacing for parsing
+      # array_content=$(printf "%s" "$array_content" | sed 's/  */ /g')
+
+      # Count elements and extract the one at the given index
+      index=$segment
+      count=0
+      level=0
+      in_string=0
+      element=""
+
+      i=1
+      len=$(printf "%s" "$array_content" | wc -c)
+      while [ $i -le $len ]; do
+        char=$(printf "%s" "$array_content" | cut -c "$i")
+
+        # Handle string escaping
+        if [ "$char" = '\' ] && [ $in_string -eq 1 ]; then
+          i=$((i + 1))
+          if [ $i -le $len ]; then
+            char=$(printf "%s" "$array_content" | cut -c "$i")
+            element="$element\\$char"
+          fi
+        elif [ "$char" = '"' ]; then
+          in_string=$((1 - in_string))
+          element="$element$char"
+        elif [ $in_string -eq 0 ] && [ "$char" = "{" ]; then
+          level=$((level + 1))
+          element="$element$char"
+        elif [ $in_string -eq 0 ] && [ "$char" = "}" ]; then
+          level=$((level - 1))
+          element="$element$char"
+        elif [ $in_string -eq 0 ] && [ "$char" = "[" ]; then
+          level=$((level + 1))
+          element="$element$char"
+        elif [ $in_string -eq 0 ] && [ "$char" = "]" ]; then
+          level=$((level - 1))
+          element="$element$char"
+        elif [ $in_string -eq 0 ] && [ "$char" = "," ] && [ $level -eq 0 ]; then
+          if [ -n "$element" ]; then
+            if [ $count -eq $index ]; then
+              # We found our element, preserve whitespace but trim excess
+              current_json=$(printf "%s" "$element" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+              break
+            fi
+            count=$((count + 1))
+            element=""
+          fi
+        else
+          # Preserve all characters including whitespace
+          element="$element$char"
+        fi
+
+        i=$((i + 1))
+      done
+
+      # Check if we found the element
+      if [ $count -ne $index ]; then
+        # Index out of bounds, return null
+        current_json=""
+      fi
+      ;;
+    esac
+
+    # If we've hit a null value, stop processing
+    if [ -z "$current_json" ]; then
+      break
+    fi
+  done
+
+  # Check if the result is a string (starts and ends with quotes)
+  if [ -n "$current_json" ]; then
+    first_char=$(printf "%s" "$current_json" | cut -c 1 2>/dev/null)
+    if [ "$first_char" = "\"" ]; then
+      # It's a string, remove the quotes
+      printf "%s" "$(printf "%s" "$current_json" | sed 's/^"\(.*\)"$/\1/')"
+    else
+      # Otherwise print as is (object or other value)
+      printf "%s" "$current_json"
+    fi
+  else
+    # If the result is empty, print empty string
+    printf ""
+  fi
 }
 
 # Command Functions.
@@ -177,6 +422,11 @@ initialize_config() {
   return 0
 }
 
+# Function to install tools of a given key.
+install_tools() {
+  printf "%s" "$(parse_config ".tools.nodej.7")"
+}
+
 # Main function
 main() {
   if [ "$1" = "update-self" ]; then
@@ -190,7 +440,7 @@ main() {
   fi
 
   if [ "$1" = "install" ]; then
-    read_config
+    install_tools
 
     # log $(parse_config $json ".tools.rust.0")
     # log $(parse_config $json ".tools.nodejs.0")
