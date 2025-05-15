@@ -1,0 +1,44 @@
+{
+  "commands": {
+    "golang": {
+      "install": "go install {tool}{version: \"@{version}\"}"
+    },
+    "nodejs": {
+      "install": "npm install -g {tool}{version: \"@{version}\"}"
+    },
+    "rust": {
+      "install": "cargo install {tool}"
+    },
+    "ruby": {
+      "install": "gem install {tool}"
+    }
+  },
+  "tools": {
+    "golang": [
+      "mvdan.cc/sh/v3/cmd/shfmt"
+    ],
+    "nodejs": [
+      "@anthropic-ai/claude-code",
+      "bash-language-server",
+      "yarn",
+      "prettier",
+      "typescript",
+      "typescript-language-server",
+      "@tailwindcss/language-server",
+      {
+        "tool": "vscode-langservers-extracted",
+        "version": 4.8
+      },
+      "svelte-language-server"
+    ],
+    "ruby": [
+      "overmind",
+      "rubocop",
+      "ruby-lsp"
+    ],
+    "rust": [
+      "scooter",
+      "bore-cli"
+    ]
+  }
+}

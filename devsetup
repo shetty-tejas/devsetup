@@ -1,0 +1,140 @@
+#!/bin/sh
+
+set -e
+
+BINARY_NAME="devsetup"
+CONFIG_FILE_LOCATION="$HOME/.config/devsetup.json"
+DESTINATION_FOLDER="$HOME/.local/bin"
+RAW_CONTENT_URL="https://raw.githubusercontent.com/shetty-tejas/devsetup/refs/heads/master"
+
+BINARY_FILE_LOCATION="$DESTINATION_FOLDER/$BINARY_NAME"
+
+# Utility Functions.
+
+# Function to echo messages to STDERR.
+error() { printf "ERROR: %b\n" "$1" >&2; }
+# Function to echo messages to STDOUT.
+log() { printf "%b\n" "$1"; }
+
+# Function to get the config location.
+get_config_location() {
+  config_file_url="$CONFIG_FILE_LOCATION"
+
+  if [ -n "${DEVSETUP_CONFIG_LOCATION+x}" ]; then
+    config_file_url="$DEVSETUP_CONFIG_LOCATION"
+  fi
+
+  echo $config_file_url
+
+  return 0
+}
+
+# Function to read the config from the config location.
+read_config() {
+  config_file_url="$(get_config_location)"
+
+  log "Reading config file from '$config_file_url'."
+
+  if [ -z "$config_file_url" ]; then
+    error "File path is missing."
+    return 1
+  fi
+
+  if [ ! -f "$config_file_url" ]; then
+    error "No file exists at '$config_file_url'."
+    return 1
+  fi
+
+  cat "$config_file_url"
+
+  return 0
+}
+
+# Command Functions.
+
+# Function to self-update from a GitHub repository
+update_self() {
+  log "Checking for updates..."
+
+  binary_url="$RAW_CONTENT_URL/$BINARY_NAME"
+  temp_file=$(mktemp)
+
+  log "Downloading latest version from '$binary_url'"
+
+  if command -v curl >/dev/null 2>&1; then
+    if ! curl -s -S -f "$binary_url" -o "$temp_file"; then
+      error "Failed to download the latest version."
+
+      rm -f "$temp_file"
+      return 1
+    fi
+  else
+    error "'curl' not found."
+
+    rm -f "$temp_file"
+    return 1
+  fi
+
+  if [ ! -s "$temp_file" ]; then
+    error "Downloaded file is empty."
+
+    rm -f "$temp_file"
+    return 1
+  fi
+
+  first_line=$(head -n 1 "$temp_file")
+
+  if log "$first_line" | grep -Eq '^#!.*[ /](bash|sh)'; then
+    :
+  else
+    error "Downloaded file doesn't appear to be a valid shell script."
+
+    rm -f "$temp_file"
+    return 1
+  fi
+
+  if cmp -s "$BINARY_FILE_LOCATION" "$temp_file"; then
+    error "Already up to date."
+
+    rm -f "$temp_file"
+    return 1
+  fi
+
+  log "Updating to the latest version..."
+  cat "$temp_file" > "$BINARY_FILE_LOCATION"
+  chmod +x "$BINARY_FILE_LOCATION"
+
+  log "Cleaning up..."
+  rm -f "$temp_file"
+
+  log "Update successful! Please run the script again."
+  return 0
+}
+
+initialize_config() {
+  log "Hello, World!"
+}
+
+# Main function
+main() {
+  if [ "$1" = "update-self" ]; then
+    update_self
+    exit $?
+  fi
+
+  if [ "$1" = "init-config" ]; then
+    initialize_config
+    exit $?
+  fi
+
+  if [ "$1" = "install" ]; then
+    read_config
+    exit $?
+  fi
+
+  log "devsetup"
+  log "Run with 'update-self' argument to update the script."
+}
+
+# Execute main function with all arguments
+main "$@"
