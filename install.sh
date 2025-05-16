@@ -28,7 +28,7 @@ install() {
   binary_url="$RAW_CONTENT_URL/$BINARY_NAME"
   temp_file=$(mktemp)
 
-  log "Downloading 'devsetup'..."
+  log "Downloading 'devsetup'...\n"
 
   if command -v curl >/dev/null 2>&1; then
     if ! curl -s -S -f "$binary_url" -o "$temp_file"; then
@@ -72,10 +72,10 @@ install() {
   cat "$temp_file" >"$BINARY_FILE_LOCATION"
   chmod +x "$BINARY_FILE_LOCATION"
 
-  log "Cleaning up..."
+  log "Cleaning up...\n"
   rm -f "$temp_file"
 
-  log "Installed '$BINARY_NAME' at '$DESTINATION_FOLDER'.\nPlease add this location to your PATH if not already done."
+  log "Installed '$BINARY_NAME' at '$DESTINATION_FOLDER'. Please add this location to your PATH if not already done."
   log "Run '$BINARY_NAME init-config' to initialize a sample configuration file."
   exit 0
 }

@@ -2,14 +2,15 @@
 
 set -e
 
+BINARY_FOLDER="$HOME/.local/bin"
 BINARY_NAME="devsetup"
+BINARY_FILE_LOCATION="$BINARY_FOLDER/$BINARY_NAME"
+
 CONFIG_FOLDER="$HOME/.config"
 CONFIG_NAME="devsetup.json"
-DESTINATION_FOLDER="$HOME/.local/bin"
-RAW_CONTENT_URL="https://raw.githubusercontent.com/shetty-tejas/devsetup/refs/heads/master"
-
-BINARY_FILE_LOCATION="$DESTINATION_FOLDER/$BINARY_NAME"
 CONFIG_FILE_LOCATION="$CONFIG_FOLDER/$CONFIG_NAME"
+
+RAW_CONTENT_URL="https://raw.githubusercontent.com/shetty-tejas/devsetup/refs/heads/master"
 
 # Utility Functions.
 
@@ -20,15 +21,22 @@ log() { printf "%b\n" "$1"; }
 # Function to return messages.
 return_with() { printf "%b" "$@"; }
 
-# Function to get the config location.
-get_config_location() {
-  config_file_url="$CONFIG_FILE_LOCATION"
+# Function to get the config folder.
+get_config_folder() {
+  config_folder="$CONFIG_FOLDER"
 
-  if [ -n "${DEVSETUP_CONFIG_LOCATION+x}" ]; then
-    config_file_url="$DEVSETUP_CONFIG_LOCATION"
+  if [ -n "${DEVSETUP_CONFIG_FOLDER+x}" ]; then
+    config_folder="$DEVSETUP_CONFIG_FOLDER"
   fi
 
-  return_with "$config_file_url"
+  return_with "$config_folder"
+
+  return 0
+}
+
+# Function to get the config location.
+get_config_location() {
+  return_with "$(get_config_folder)/$CONFIG_NAME"
 
   return 0
 }
@@ -306,12 +314,10 @@ parse_config() {
 
 # Function to self-update from a GitHub repository
 update_self() {
-  log "Checking for updates..."
-
   binary_url="$RAW_CONTENT_URL/$BINARY_NAME"
   temp_file=$(mktemp)
 
-  log "Downloading latest version from '$binary_url'"
+  log "Downloading latest version from '$binary_url'...\n"
 
   if command -v curl >/dev/null 2>&1; then
     if ! curl -s -S -f "$binary_url" -o "$temp_file"; then
@@ -356,29 +362,31 @@ update_self() {
   cat "$temp_file" >"$BINARY_FILE_LOCATION"
   chmod +x "$BINARY_FILE_LOCATION"
 
-  log "Cleaning up..."
+  log "Cleaning up...\n"
   rm -f "$temp_file"
 
-  log "Update successful! Please run the script again."
+  log "Update successful."
+
   return 0
 }
 
 initialize_config() {
-  if [ -e "$CONFIG_FILE_LOCATION" ]; then
-    error "'$CONFIG_NAME' already exists in '$CONFIG_FOLDER'. Update that file according to your needs, or delete the config to reinitialize.\n"
+  config_folder=$(get_config_folder)
+  config_file_location=$(get_config_location)
+
+  if [ -e "$config_file_location" ]; then
+    error "'$CONFIG_NAME' already exists in '$config_folder'. Update that file according to your needs, or delete the config to reinitialize.\n"
 
     return 1
   fi
 
-  log "Creating config file at '$CONFIG_FILE_LOCATION'..."
-
-  config_url="$RAW_CONTENT_URL/$CONFIG_NAME"
+  config_download_url="$RAW_CONTENT_URL/$CONFIG_NAME"
   temp_file=$(mktemp)
 
-  log "Downloading latest config from '$config_url'"
+  log "Downloading latest config from '$config_download_url'...\n"
 
   if command -v curl >/dev/null 2>&1; then
-    if ! curl -s -S -f "$config_url" -o "$temp_file"; then
+    if ! curl -s -S -f "$config_download_url" -o "$temp_file"; then
       error "Failed to download the latest config."
 
       rm -f "$temp_file"
@@ -411,20 +419,20 @@ initialize_config() {
 
   log "Writing the config..."
 
-  mkdir -p "$CONFIG_FOLDER"
-  touch "$CONFIG_FILE_LOCATION"
-  cat "$temp_file" >"$CONFIG_FILE_LOCATION"
+  mkdir -p "$config_folder"
+  touch "$config_file_location"
+  cat "$temp_file" >"$config_file_location"
 
-  log "Cleaning up..."
+  log "Cleaning up...\n"
   rm -f "$temp_file"
 
-  log "Config has been created in '$CONFIG_FILE_LOCATION'."
+  log "Config has been created in '$config_file_location'."
   return 0
 }
 
 # Function to install tools of a given key.
 install_tools() {
-  printf "%s" "$(parse_config ".tools.nodej.7")"
+  printf "%s" "$(parse_config ".tools.nodejs.7")"
 }
 
 # Main function
