@@ -1,6 +1,6 @@
 # DevSetup
 
-A language/environment agnostic tool for package management that works in any POSIX compliant shell.
+A language/environment agnostic tool for package management that works in any POSIX compliant shell. A single shell script, no dependencies!
 
 ## Features
 
@@ -17,18 +17,23 @@ Install 'devsetup' with a single command:
 curl https://raw.githubusercontent.com/shetty-tejas/devsetup/refs/heads/master/install.sh | sh
 ```
 
+Behind the scenes, installation is as simple as creating a script in `$HOME/.local/bin/`. You won't need any su privileges.
+
 After it's installed, you need to initialize the config file:
 
 ```sh
 devsetup init-config
 ```
 
-You should be finding the config file in `$HOME/.config/devsetup.json`.
-###### NOTE: You can also set a custom directory for storing your config file by setting DEVSETUP_CONFIG_FOLDER environment variable.
+You can find the config file in `$HOME/.config/devsetup.json`.
+##### You can also set a custom directory for storing your config file by setting DEVSETUP_CONFIG_FOLDER.
+##### Example: `set DEVSETUP_CONFIG_FOLDER="$HOME/.dotfiles"` would write and read config from `$HOME/.dotfiles/devsetup.json`.
+
+Now, you can update the config file as per your needs. The example file has the tooling that I use, so feel free to replace them as per your needs.
 
 ## Usage
 
-After installation, you can manage your development environment and packages using the `devsetup` command.
+After installation (and updating the configuration as you want), you can manage your development environment and packages using the `devsetup` command.
 
 1. You can install the packages for a particular tool by calling `devsetup install {tool}`.
 
