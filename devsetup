@@ -310,6 +310,103 @@ parse_config() {
   fi
 }
 
+# Function to extract all keys from a JSON object
+# P.S I don't know how this works either. Thanks, Claude!
+get_object_keys() {
+  object_json="$1"
+
+  # Remove outer braces and whitespace
+  content=$(printf "%s" "$object_json" | sed 's/^{//;s/}$//;s/^[[:space:]]*//;s/[[:space:]]*$//')
+
+  # Split content by commas at the top level (not inside nested objects/arrays)
+  level=0
+  in_string=0
+  current=""
+
+  i=0
+  len=$(printf "%s" "$content" | wc -c)
+
+  while [ $i -lt "$len" ]; do
+    i=$((i + 1))
+    char=$(printf "%s" "$content" | cut -c "$i")
+
+    # Handle string escaping
+    if [ "$char" = "\\" ] && [ $in_string -eq 1 ]; then
+      current="$current$char"
+      i=$((i + 1))
+      if [ $i -le "$len" ]; then
+        char=$(printf "%s" "$content" | cut -c "$i")
+        current="$current$char"
+      fi
+    elif [ "$char" = "\"" ]; then
+      in_string=$((1 - in_string))
+      current="$current$char"
+    elif [ $in_string -eq 0 ] && [ "$char" = "{" -o "$char" = "[" ]; then
+      level=$((level + 1))
+      current="$current$char"
+    elif [ $in_string -eq 0 ] && [ "$char" = "}" -o "$char" = "]" ]; then
+      level=$((level - 1))
+      current="$current$char"
+    elif [ $in_string -eq 0 ] && [ "$char" = "," ] && [ $level -eq 0 ]; then
+      # Extract key from current segment and print with a newline
+      printf "%s\n" "$(printf "%s" "$current" | sed -n 's/^[[:space:]]*"\([^"]*\)"[[:space:]]*:.*/\1/p')"
+      current=""
+    else
+      current="$current$char"
+    fi
+  done
+
+  # Process the last key-value pair with a newline
+  if [ -n "$current" ]; then
+    printf "%s\n" "$(printf "%s" "$current" | sed -n 's/^[[:space:]]*"\([^"]*\)"[[:space:]]*:.*/\1/p')"
+  fi
+}
+
+# Function to count items in a JSON array
+# P.S: Need I say again? I definitely don't understand this either xD
+count_array_items() {
+  array_json="$1"
+
+  # Remove outer brackets and whitespace
+  trimmed=$(printf "%s" "$array_json" | sed 's/^\[//;s/\]$//;s/^[[:space:]]*//;s/[[:space:]]*$//')
+
+  # If array is empty, return 0
+  if [ -z "$trimmed" ]; then
+    printf "0"
+    return
+  fi
+
+  # Count items by counting commas at the top level and adding 1
+  # We need to handle nested arrays and objects properly
+  level=0
+  in_string=0
+  commas=0
+
+  i=0
+  len=$(printf "%s" "$trimmed" | wc -c)
+
+  while [ $i -lt "$len" ]; do
+    i=$((i + 1))
+    char=$(printf "%s" "$trimmed" | cut -c "$i")
+
+    # Handle string escaping
+    if [ "$char" = "\\" ] && [ $in_string -eq 1 ]; then
+      i=$((i + 1)) # Skip next character
+    elif [ "$char" = "\"" ]; then
+      in_string=$((1 - in_string)) # Toggle string mode
+    elif [ $in_string -eq 0 ] && [ "$char" = "{" -o "$char" = "[" ]; then
+      level=$((level + 1))
+    elif [ $in_string -eq 0 ] && [ "$char" = "}" -o "$char" = "]" ]; then
+      level=$((level - 1))
+    elif [ $in_string -eq 0 ] && [ "$char" = "," ] && [ $level -eq 0 ]; then
+      commas=$((commas + 1))
+    fi
+  done
+
+  # Items = commas + 1 (unless array was empty)
+  printf "%d" $((commas + 1))
+}
+
 # Command Functions.
 
 # Function to self-update from a GitHub repository
@@ -432,7 +529,69 @@ initialize_config() {
 
 # Function to install tools of a given key.
 install_tools() {
-  printf "%s" "$(parse_config ".tools.nodejs.7")"
+  platform="$1"
+  install_template=$(parse_config ".commands.$platform.install")
+
+  log "$install_template"
+
+  if [ -z "$install_template" ]; then
+    error "No tools found for platform: $platform."
+
+    return 1
+  fi
+
+  log "Installing '$platform' tools using template: '$install_template'..."
+
+  tools_json="$(parse_config ".tools.$platform")"
+  array_length=$(count_array_items "$tools_json")
+
+  i=0
+  while [ $i -lt "$array_length" ]; do
+    item=$(parse_config ".tools.$platform.$i")
+    first_char=$(printf "%s" "$item" | cut -c 1 2>/dev/null)
+
+    if [ "$first_char" = "{" ]; then
+      keys=$(get_object_keys "$item")
+
+      for key in $keys; do
+        value=$(parse_config ".tools.$platform.$i.$key")
+
+        sanitized_key=$(printf "%s" "$key" | tr -cd 'a-zA-Z0-9_')
+
+        if [ "$sanitized_key" = "$key" ]; then
+          eval "$key=\"$value\""
+        else
+          error "Skipping unsafe key: $key"
+        fi
+      done
+    else
+      tool="$item"
+    fi
+
+    # Generate install command using the template from config
+    eval "install_cmd=\"$install_template\""
+
+    printf "Executing: %s\n" "$install_cmd"
+    eval "$install_cmd"
+
+    # Increment counter
+    i=$((i + 1))
+
+    # Unset Variables - dynamically unset all variables that were set
+    if [ "$first_char" = "{" ]; then
+      for key in $keys; do
+        sanitized_key=$(printf "%s" "$key" | tr -cd 'a-zA-Z0-9_')
+
+        if [ "$sanitized_key" = "$key" ]; then
+          eval "unset $key"
+        fi
+      done
+    else
+      unset tool
+    fi
+  done
+
+  log "All packages installed for '$platform'."
 }
 
 # Main function
@@ -448,12 +607,7 @@ main() {
   fi
 
   if [ "$1" = "install" ]; then
-    install_tools
-
-    # log $(parse_config $json ".tools.rust.0")
-    # log $(parse_config $json ".tools.nodejs.0")
-    # log $(parse_config $json ".tools.nodejs.7")
-    # log $(parse_config $json ".commands.nodejs.install")
+    install_tools $2
     exit $?
   fi
 
